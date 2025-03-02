@@ -1,107 +1,481 @@
----
-title: 'Development'
-description: 'Preview changes locally to update your docs'
----
+# Developer Authentication
 
-<Info>
-  **Prerequisite**: Please install Node.js (version 19 or higher) before proceeding. <br />
-  Please upgrade to ```docs.json``` before proceeding and delete the legacy ```mint.json``` file.
-</Info>
+Add a quick developer authentication experience to login quickly to any user.
 
-Follow these steps to install and run Mintlify on your operating system:
+## Middleware
 
-**Step 1**: Install Mintlify:
+Add the `LocalMiddleware.php` file to the Middleware folder and register the middleware in the `bootstrap\app.php` file.
 
-<CodeGroup>
+::: code-group
 
-  ```bash npm
-  npm i -g mintlify
-  ```
+```php
+<?php
 
-```bash yarn
-yarn global add mintlify
+import { Head, useForm } from '@inertiajs/react';
+import { LoaderCircle } from 'lucide-react';// [!code --]
+import { LoaderCircle, Check, ChevronsUpDown } from 'lucide-react';// [!code ++]
+import { FormEventHandler } from 'react';// [!code --]
+import { FormEventHandler, useState } from 'react';// [!code ++]
+
+import InputError from '@/components/input-error';
+import TextLink from '@/components/text-link';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import AuthLayout from '@/layouts/auth-layout';
+import { cn } from "@/lib/utils";// [!code ++]
+import {// [!code ++]
+  Command,// [!code ++]
+  CommandEmpty,// [!code ++]
+  CommandGroup,// [!code ++]
+  CommandInput,// [!code ++]
+  CommandItem,// [!code ++]
+  CommandList,// [!code ++]
+} from "@/components/ui/command";// [!code ++]
+import {// [!code ++]
+  Popover,// [!code ++]
+  PopoverContent,// [!code ++]
+  PopoverTrigger,// [!code ++]
+} from "@/components/ui/popover";// [!code ++]
+
 ```
 
-</CodeGroup>
 
-**Step 2**: Navigate to the docs directory (where the `docs.json` file is located) and execute the following command:
 
-```bash
-mintlify dev
+```php:line-numbers [app\Http\Middleware\LocalMiddleware.php]
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+
+class LocalEnvironment
+{
+    /**
+     * Handle an incoming request.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  \Closure  $next
+     * @return mixed
+     */
+    public function handle(Request $request, Closure $next)
+    {
+        if (app()->environment('local')) {
+            return $next($request);
+        }
+
+        abort(403, 'Unauthorized.');
+    }
+}
 ```
 
-A local preview of your documentation will be available at `http://localhost:3000`.
+```php:line-numbers [bootstrap/app.php]
+<?php
 
-### Custom Ports
+use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\LocalEnvironment; // [!code ++]
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 
-By default, Mintlify uses port 3000. You can customize the port Mintlify runs on by using the `--port` flag. To run Mintlify on port 3333, for instance, use this command:
-
-```bash
-mintlify dev --port 3333
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->web(append: [
+            HandleInertiaRequests::class,
+            AddLinkHeadersForPreloadedAssets::class,
+            LocalEnvironment::class, // [!code ++]
+        ]);
+    })
+    ->withExceptions(function (Exceptions $exceptions) {
+        //
+    })->create();
 ```
 
-If you attempt to run Mintlify on a port that's already in use, it will use the next available port:
+:::
 
-```md
-Port 3000 is already in use. Trying 3001 instead.
+## Routes
+
+Add the following code to the `auth.php` routes file.
+
+::: code-group
+
+```php:line-numbers [routes/auth.php]
+use App\Http\Middleware\LocalEnvironment; // [!code ++]
+
+Route::middleware('guest')->group(function () {
+    Route::get('/dev-login/{id}', DeveloperAuthController::class) // [!code ++]
+        ->middleware('guest') // [!code ++]
+        ->middleware(LocalEnvironment::class) // [!code ++]
+        ->name('dev.login'); // [!code ++]
+});
+
 ```
 
-## Mintlify Versions
+:::
 
-Please note that each CLI release is associated with a specific version of Mintlify. If your local website doesn't align with the production version, please update the CLI:
+## Controller
 
-<CodeGroup>
+::: code-group
 
-```bash npm
-npm i -g mintlify@latest
+```php:line-numbers [app/Http/Controllers/Auth/DeveloperAuthController.php]
+<?php
+
+namespace App\Http\Controllers\Auth;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth;
+
+class DeveloperAuthController extends Controller
+{
+    public function __invoke(int $id): RedirectResponse
+    {
+        Auth::loginUsingId($id);
+
+        return redirect()->intended(route('dashboard', absolute: false));
+    }
+}
 ```
 
-```bash yarn
-yarn global upgrade mintlify
+:::
+
+## Frontend React Components
+
+This markdown file documents the implementation of a login page with a special developer authentication option that leverages the shadcn/ui combobox component.
+
+### Overview
+
+We've enhanced the standard login form by adding a developer authentication shortcut. This feature is only available in development environments and allows developers to quickly sign in as any user in the system without having to enter their credentials manually.
+
+### Key Components
+
+1. Type Definitions
+
+::: code-group
+
+```tsx:line-numbers [resources/js/pages/auth/login.tsx]
+type LoginForm = {
+    email: string;
+    password: string;
+    remember: boolean;
+};
+
+type User = {
+    id: number;
+    name: string;
+    email: string;
+};
+
+interface LoginProps {
+    status?: string;
+    canResetPassword: boolean;
+    isDev?: boolean;
+    users?: User[]; // Passed from the controller
+}
 ```
 
-</CodeGroup>
-
-## Validating Links
-
-The CLI can assist with validating reference links made in your documentation. To identify any broken links, use the following command:
-
-```bash
-mintlify broken-links
+```tsx:line-numbers [resources/js/pages/auth/login.tsx]
+const [open, setOpen] = useState(false);
+const [selectedUserId, setSelectedUserId] = useState<string>("");
+const [searchQuery, setSearchQuery] = useState<string>("");
 ```
 
-## Deployment
+:::
 
-<Tip>
-  Unlimited editors available under the [Pro
-  Plan](https://mintlify.com/pricing) and above.
-</Tip>
+* open: Controls the popover state (open/closed)
 
-If the deployment is successful, you should see the following:
+* selectedUserId: Tracks the currently selected user's ID
 
-<Frame>
-  <img src="/images/checks-passed.png" style={{ borderRadius: '0.5rem' }} />
-</Frame>
+* searchQuery: Manages the search input text
 
-## Code Formatting
+### User Selection Logic
 
-We suggest using extensions on your IDE to recognize and format MDX. If you're a VSCode user, consider the [MDX VSCode extension](https://marketplace.visualstudio.com/items?itemName=unifiedjs.vscode-mdx) for syntax highlighting, and [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode) for code formatting.
+::: code-group
 
-## Troubleshooting
+```tsx:line-numbers [resources/js/pages/auth/login.tsx]
+const handleUserSelect = (userId: string) => {
+    setSelectedUserId(userId);
+    const user = users.find(u => u.id.toString() === userId);
+    if (user) {
+        // Navigate to the dev login route
+        window.location.href = route('dev.login', user.id);
+    }
+};
 
-<AccordionGroup>
-  <Accordion title='Error: Could not load the "sharp" module using the darwin-arm64 runtime'>
+const selectedUser = users.find(user => user.id.toString() === selectedUserId);
+```
 
-    This may be due to an outdated version of node. Try the following:
-    1. Remove the currently-installed version of mintlify: `npm remove -g mintlify`
-    2. Upgrade to Node v19 or higher.
-    3. Reinstall mintlify: `npm install -g mintlify`
-  </Accordion>
+:::
 
-  <Accordion title="Issue: Encountering an unknown error">
-  
-    Solution: Go to the root of your device and delete the \~/.mintlify folder. Afterwards, run `mintlify dev` again.
-  </Accordion>
-</AccordionGroup>
+This implements real-time filtering of the user list as the developer types in the search box:
 
-Curious about what changed in the CLI version? [Check out the CLI changelog.](https://www.npmjs.com/package/mintlify?activeTab=versions)
+* Search works on both name and email (case-insensitive)
+
+* The filtered list updates instantly as the search query changes
+
+### 5. UI Components
+
+**Standard Login Form**
+
+The standard email/password login form remains intact, allowing regular users to authenticate normally.
+
+**Developer Combobox**
+
+::: code-group
+
+```tsx:line-number {136-193} [resources/js/pages/auth/login.tsx]
+import { Head, useForm } from '@inertiajs/react';
+import { LoaderCircle } from 'lucide-react';// [!code --]
+import { LoaderCircle, Check, ChevronsUpDown } from 'lucide-react';// [!code ++]
+import { FormEventHandler } from 'react';// [!code --]
+import { FormEventHandler, useState } from 'react';// [!code ++]
+
+import InputError from '@/components/input-error';
+import TextLink from '@/components/text-link';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import AuthLayout from '@/layouts/auth-layout';
+import { cn } from "@/lib/utils";// [!code ++]
+import {// [!code ++]
+  Command,// [!code ++]
+  CommandEmpty,// [!code ++]
+  CommandGroup,// [!code ++]
+  CommandInput,// [!code ++]
+  CommandItem,// [!code ++]
+  CommandList,// [!code ++]
+} from "@/components/ui/command";// [!code ++]
+import {// [!code ++]
+  Popover,// [!code ++]
+  PopoverContent,// [!code ++]
+  PopoverTrigger,// [!code ++]
+} from "@/components/ui/popover";// [!code ++]
+
+type LoginForm = {
+    email: string;
+    password: string;
+    remember: boolean;
+};
+
+interface LoginProps {
+    status?: string;
+    canResetPassword: boolean;
+    isDev?: boolean;// [!code ++]
+    users?: User[];// [!code ++]
+}
+
+type User = {// [!code ++]
+    id: number;// [!code ++]
+    name: string;// [!code ++]
+    email: string;// [!code ++]
+};// [!code ++]
+
+export default function Login({ status, canResetPassword }: LoginProps) {// [!code --]
+export default function Login({ status, canResetPassword, isDev, users = [] }: LoginProps) {// [!code ++]
+    const { data, setData, post, processing, errors, reset } = useForm<LoginForm>({
+        email: '',
+        password: '',
+        remember: false,
+    });
+
+    const submit: FormEventHandler = (e) => {
+        e.preventDefault();
+        post(route('login'), {
+            onFinish: () => reset('password'),
+        });
+    };
+
+    const handleUserSelect = (userId: string) => {// [!code ++]
+        setSelectedUserId(userId);// [!code ++]
+        const user = users.find(u => u.id.toString() === userId);// [!code ++]
+        if (user) {// [!code ++]
+            window.location.href = route('dev.login', user.id);// [!code ++]
+        }// [!code ++]
+    };// [!code ++]
+
+    const selectedUser = users.find(user => user.id.toString() === selectedUserId);// [!code ++]
+
+    const filteredUsers = users.filter(user =>// [!code ++]
+        user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||// [!code ++]
+        user.email.toLowerCase().includes(searchQuery.toLowerCase())// [!code ++]
+    );// [!code ++]
+
+    const handleSearchChange = (value: string) => {// [!code ++]
+        setSearchQuery(value);// [!code ++]
+    };// [!code ++]
+
+    return (
+        <AuthLayout title="Log in to your account" description="Enter your email and password below to log in">
+            <Head title="Log in" />
+
+            <form className="flex flex-col gap-6" onSubmit={submit}>
+                <div className="grid gap-6">
+                    <div className="grid gap-2">
+                        <Label htmlFor="email">Email address</Label>
+                        <Input
+                            id="email"
+                            type="email"
+                            required
+                            autoFocus
+                            tabIndex={1}
+                            autoComplete="email"
+                            value={data.email}
+                            onChange={(e) => setData('email', e.target.value)}
+                            placeholder="email@example.com"
+                        />
+                        <InputError message={errors.email} />
+                    </div>
+
+                    <div className="grid gap-2">
+                        <div className="flex items-center">
+                            <Label htmlFor="password">Password</Label>
+                            {canResetPassword && (
+                                <TextLink href={route('password.request')} className="ml-auto text-sm" tabIndex={5}>
+                                    Forgot password?
+                                </TextLink>
+                            )}
+                        </div>
+                        <Input
+                            id="password"
+                            type="password"
+                            required
+                            tabIndex={2}
+                            autoComplete="current-password"
+                            value={data.password}
+                            onChange={(e) => setData('password', e.target.value)}
+                            placeholder="Password"
+                        />
+                        <InputError message={errors.password} />
+                    </div>
+
+                    <div className="flex items-center space-x-3">
+                        <Checkbox id="remember" name="remember" checked={data.remember} onClick={() => setData('remember', !data.remember)} tabIndex={3} />
+                        <Label htmlFor="remember">Remember me</Label>
+                    </div>
+
+                    <Button type="submit" className="mt-4 w-full" tabIndex={4} disabled={processing}>
+                        {processing && <LoaderCircle className="h-4 w-4 animate-spin" />}
+                        Log in
+                    </Button>
+
+                    {isDev && ( // [!code ++]
+                        <> // [!code ++]
+                                <div className="relative"> // [!code ++]
+                                <div className="absolute inset-0 flex items-center"> // [!code ++]
+                                    <div className="w-full border-t border-gray-300" /> // [!code ++]
+                                </div>// [!code ++]
+                                <div className="relative flex justify-center text-sm">// [!code ++]
+                                    <span className="px-2 bg-white text-gray-500">// [!code ++]
+                                        Or continue with// [!code ++]
+                                    </span>// [!code ++]
+                                </div>// [!code ++]
+                            </div>// [!code ++]
+
+                            <Popover open={open} onOpenChange={setOpen}>// [!code ++]
+                                <PopoverTrigger asChild>// [!code ++]
+                                <Button// [!code ++]
+                                    variant="outline"// [!code ++]
+                                    role="combobox"// [!code ++]
+                                    aria-expanded={open}// [!code ++]
+                                    className="min-w-full justify-between"// [!code ++]
+                                >// [!code ++]
+                                    {selectedUser ? selectedUser.name : "Select a user to log on as..."}// [!code ++]
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />// [!code ++]
+                                </Button>// [!code ++]
+                                </PopoverTrigger>// [!code ++]
+                                <PopoverContent className="min-w-full p-0">// [!code ++]
+                                    <Command>// [!code ++]
+                                        <CommandInput// [!code ++]
+                                            placeholder="Search user..."// [!code ++]
+                                            value={searchQuery}// [!code ++]
+                                            onValueChange={handleSearchChange}// [!code ++]
+                                        />// [!code ++]
+                                        <CommandList>// [!code ++]
+                                            <CommandEmpty>No user found.</CommandEmpty>// [!code ++]
+                                            <CommandGroup>// [!code ++]
+                                                {filteredUsers.map((user) => (// [!code ++]
+                                                    <CommandItem// [!code ++]
+                                                        key={user.id}// [!code ++]
+                                                        value={`${user.name} ${user.email}`}// [!code ++]
+                                                        onSelect={() => handleUserSelect(user.id.toString())}// [!code ++]
+                                                    >// [!code ++]
+                                                        {user.name} ({user.email})// [!code ++]
+                                                        <Check// [!code ++]
+                                                            className={cn(// [!code ++]
+                                                                "ml-auto",// [!code ++]
+                                                                selectedUserId === user.id.toString() ? "opacity-100" : "opacity-0"// [!code ++]
+                                                            )}// [!code ++]
+                                                        />// [!code ++]
+                                                    </CommandItem>// [!code ++]
+                                                ))}// [!code ++]
+                                            </CommandGroup>// [!code ++]
+                                        </CommandList>// [!code ++]
+                                    </Command>// [!code ++]
+                                </PopoverContent>// [!code ++]
+                            </Popover>// [!code ++]
+                        </>// [!code ++]
+                    )}// [!code ++]
+                </div>
+
+                <div className="text-muted-foreground text-center text-sm">
+                    Don't have an account?{' '}
+                    <TextLink href={route('register')} tabIndex={5}>
+                        Sign up
+                    </TextLink>
+                </div>
+            </form>
+
+            {status && <div className="mb-4 text-center text-sm font-medium text-green-600">{status}</div>}
+        </AuthLayout>
+    );
+}
+```
+
+:::
+
+The developer authentication option:
+
+* Only appears when isDev is true
+
+* Uses shadcn/ui's Popover and Command components to create a searchable dropdown
+
+* Shows a checkmark next to the currently selected user
+
+* Displays both name and email for each user
+
+* Searches across both name and email fields
+
+### Integration with Backend
+
+The component expects the Laravel controller to:
+
+1. Pass the `isDev` flag based on the environment
+
+2. Provide the `users` array with user objects containing id, name, and email
+
+3. Have a `dev.login` route that accepts a user ID parameter
+
+### Accessibility Features
+
+* Full keyboard navigation support
+
+* Proper ARIA attributes for screen readers
+
+* Tabindex attributes to ensure logical focus order
+
+### Visual Divider
+
+A visual divider with the text "Or continue with" separates the standard login form from the developer authentication option, making the interface intuitive and well-organized.
+
+### Conclusion
+
+This enhanced login component provides a seamless developer experience while maintaining the standard authentication flow for regular users. The search functionality makes it easy to find specific users in large systems, improving development efficiency.
